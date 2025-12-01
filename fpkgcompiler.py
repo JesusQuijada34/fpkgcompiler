@@ -118,84 +118,80 @@ class FlangCompiler:
         """
         print("[INFO] 🔧 Instalando PyInstaller en Linux...")
         
+        # Crear script de instalación bash
+        install_script = """#!/bin/bash
+echo "🔧 Instalando python3-full, python3-venv y pipx..."
+sudo apt install -y python3-full python3-venv pipx
+
+echo "🔧 Configurando pipx..."
+pipx ensurepath
+
+VENV_DIR="$HOME/venv-pyinstaller"
+if [ ! -d "$VENV_DIR" ]; then
+    echo "🧪 Creando entorno virtual en $VENV_DIR..."
+    python3 -m venv "$VENV_DIR"
+else
+    echo "🔁 El entorno virtual ya existe en $VENV_DIR."
+fi
+
+echo "🚀 Activando entorno virtual..."
+source "$VENV_DIR/bin/activate"
+
+echo "📦 Instalando PyInstaller..."
+pip install --upgrade pip
+pip install pyinstaller
+
+echo "✅ PyInstaller instalado. Versión:"
+pyinstaller --version
+
+echo "🎉 Entorno listo. Puedes usar PyInstaller dentro del entorno virtual."
+"""
+        
         try:
-            # Paso 1: Instalar dependencias del sistema
-            print("[INFO] 🔧 Instalando python3-full, python3-venv y pipx...")
+            # Crear archivo temporal para el script
+            script_path = Path(tempfile.gettempdir()) / "install_pyinstaller.sh"
+            
+            with open(script_path, 'w', newline='\n') as f:
+                f.write(install_script)
+            
+            # Hacer el script ejecutable
+            os.chmod(script_path, 0o755)
+            
+            print(f"[INFO] Ejecutando script de instalación: {script_path}")
+            
+            # Ejecutar el script
             result = subprocess.run(
-                ["sudo", "apt", "install", "-y", "python3-full", "python3-venv", "pipx"],
-                capture_output=True,
+                ["bash", str(script_path)],
+                capture_output=False,
                 text=True
             )
+            
+            # Limpiar script temporal
+            try:
+                script_path.unlink()
+            except Exception:
+                pass
+            
             if result.returncode != 0:
-                print(f"[ERROR] Error instalando dependencias del sistema:\n{result.stderr}")
+                print(f"[ERROR] Error durante la instalación de PyInstaller")
                 return False
-            print("[OK] ✅ Dependencias del sistema instaladas")
             
-            # Paso 2: Configurar pipx
-            print("[INFO] 🔧 Configurando pipx...")
-            result = subprocess.run(
-                ["pipx", "ensurepath"],
-                capture_output=True,
-                text=True
-            )
-            if result.returncode != 0:
-                print(f"[WARN] Advertencia al configurar pipx:\n{result.stderr}")
-            
-            # Paso 3: Crear entorno virtual
+            # Verificar que el entorno virtual fue creado
             venv_dir = Path.home() / "venv-pyinstaller"
             self.venv_path = venv_dir
             
             if not venv_dir.exists():
-                print(f"[INFO] 🧪 Creando entorno virtual en {venv_dir}...")
-                result = subprocess.run(
-                    ["python3", "-m", "venv", str(venv_dir)],
-                    capture_output=True,
-                    text=True
-                )
-                if result.returncode != 0:
-                    print(f"[ERROR] Error creando entorno virtual:\n{result.stderr}")
-                    return False
-                print("[OK] ✅ Entorno virtual creado")
-            else:
-                print(f"[INFO] 🔁 El entorno virtual ya existe en {venv_dir}")
-            
-            # Paso 4: Actualizar pip en el entorno virtual
-            pip_path = venv_dir / "bin" / "pip"
-            print("[INFO] 📦 Actualizando pip...")
-            result = subprocess.run(
-                [str(pip_path), "install", "--upgrade", "pip"],
-                capture_output=True,
-                text=True
-            )
-            if result.returncode != 0:
-                print(f"[WARN] Advertencia al actualizar pip:\n{result.stderr}")
-            
-            # Paso 5: Instalar PyInstaller
-            print("[INFO] 📦 Instalando PyInstaller...")
-            result = subprocess.run(
-                [str(pip_path), "install", "pyinstaller"],
-                capture_output=True,
-                text=True
-            )
-            if result.returncode != 0:
-                print(f"[ERROR] Error instalando PyInstaller:\n{result.stderr}")
+                print(f"[ERROR] El entorno virtual no fue creado en {venv_dir}")
                 return False
-            print("[OK] ✅ PyInstaller instalado")
             
-            # Paso 6: Verificar instalación
+            # Verificar que PyInstaller fue instalado
             pyinstaller_path = venv_dir / "bin" / "pyinstaller"
-            result = subprocess.run(
-                [str(pyinstaller_path), "--version"],
-                capture_output=True,
-                text=True
-            )
-            if result.returncode == 0:
-                print(f"[OK] ✅ PyInstaller instalado correctamente. Versión: {result.stdout.strip()}")
-                print("[INFO] 🎉 Entorno listo. PyInstaller disponible en el entorno virtual.")
-                return True
-            else:
-                print(f"[ERROR] Error verificando PyInstaller:\n{result.stderr}")
+            if not pyinstaller_path.exists():
+                print(f"[ERROR] PyInstaller no fue instalado en {pyinstaller_path}")
                 return False
+            
+            print(f"[OK] ✅ PyInstaller instalado correctamente en {venv_dir}")
+            return True
                 
         except Exception as e:
             print(f"[ERROR] Excepción durante la instalación de PyInstaller: {e}")
@@ -782,443 +778,30 @@ class FlangCompiler:
         return iflapp_path
 
 
-class CompilationWorker(QThread):
-    """Hilo de trabajo para la compilación asíncrona."""
-    finished = pyqtSignal(bool, str)
-    progress = pyqtSignal(int)
+# Clases que dependen de PyQt5 - solo se definen si está disponible
+if HAS_PYQT5:
+    class CompilationWorker(QThread):
+        """Hilo de trabajo para la compilación asíncrona."""
+        finished = pyqtSignal(bool, str)
+        progress = pyqtSignal(int)
 
-    def __init__(self, repo_path, output_path):
-        super().__init__()
-        self.repo_path = repo_path
-        self.output_path = output_path
-        self.compiler = None
+        def __init__(self, repo_path, output_path):
+            super().__init__()
+            self.repo_path = repo_path
+            self.output_path = output_path
+            self.compiler = None
 
-    def run(self):
-        self.compiler = FlangCompiler(self.repo_path, self.output_path, progress_callback=self.progress.emit)
-        result_path = self.compiler.run()
-        self.finished.emit(result_path is not None, str(result_path) if result_path else "")
+        def run(self):
+            self.compiler = FlangCompiler(self.repo_path, self.output_path, progress_callback=self.progress.emit)
+            result_path = self.compiler.run()
+            self.finished.emit(result_path is not None, str(result_path) if result_path else "")
 
 
-class StreamRedirector(QObject):
-    """Redirige stdout/stderr a una señal Qt."""
-    text_written = pyqtSignal(str)
+    class StreamRedirector(QObject):
+        """Redirige stdout/stderr a una señal Qt."""
+        text_written = pyqtSignal(str)
 
-    def write(self, text):
-        self.text_written.emit(str(text))
-
-    def flush(self):
-        pass
-
-class Win11Button(QPushButton):
-    """Botón estilo Windows 11 (Accent Color)."""
-    def __init__(self, text, parent=None, is_primary=True):
-        super().__init__(text, parent)
-        self.setCursor(Qt.PointingHandCursor)
-        self.setFixedHeight(36)
-        self.setFont(QFont("Segoe UI Variable Display", 9))
-        
-        self.is_primary = is_primary
-        self.update_style()
-
-    def update_style(self):
-        if self.is_primary:
-            # Estilo Accent (Azul)
-            self.setStyleSheet("""
-                QPushButton {
-                    background-color: #0078D4;
-                    color: white;
-                    border-radius: 4px;
-                    border: 1px solid #0078D4;
-                    padding: 0 16px;
-                }
-                QPushButton:hover {
-                    background-color: #1084D9;
-                    border: 1px solid #1084D9;
-                }
-                QPushButton:pressed {
-                    background-color: #006CC1;
-                    border: 1px solid #006CC1;
-                }
-                QPushButton:disabled {
-                    background-color: #333333;
-                    color: #888888;
-                    border: 1px solid #333333;
-                }
-            """)
-        else:
-            # Estilo Standard (Gris Oscuro)
-            self.setStyleSheet("""
-                QPushButton {
-                    background-color: #2D2D2D;
-                    color: white;
-                    border-radius: 4px;
-                    border: 1px solid #3D3D3D;
-                    padding: 0 16px;
-                }
-                QPushButton:hover {
-                    background-color: #3D3D3D;
-                    border: 1px solid #4D4D4D;
-                }
-                QPushButton:pressed {
-                    background-color: #262626;
-                    border: 1px solid #262626;
-                }
-            """)
-
-class TitleBarButton(QPushButton):
-    """Botón de barra de título (Min, Max, Close)."""
-    def __init__(self, icon_path, parent=None, is_close=False):
-        super().__init__(parent)
-        self.setFixedSize(46, 32)
-        self.setIcon(QIcon(icon_path))
-        self.setIconSize(QSize(10, 10))
-        self.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                border: none;
-            }
-            QPushButton:hover {
-                background-color: %s;
-            }
-            QPushButton:pressed {
-                background-color: %s;
-            }
-        """ % ("#C42B1C" if is_close else "#333333", "#B32415" if is_close else "#262626"))
-
-class StreamRedirector(QObject):
-    """Redirige stdout/stderr a una señal Qt."""
-    text_written = pyqtSignal(str)
-    
-    def write(self, text):
-        self.text_written.emit(str(text))
-        
-    def flush(self):
-        pass
-
-class OutputTerminal(QTextEdit):
-    """Terminal de solo salida para logs del compilador."""
-
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setReadOnly(True)  # Solo lectura
-        self.setStyleSheet("""
-            QTextEdit { 
-                background-color: #012456; 
-                border-radius: 4px; 
-                border: 1px solid #333333;
-                padding: 10px;
-                color: #CCCCCC;
-                font-family: 'Consolas', 'Lucida Console', monospace;
-                font-size: 14px;
-            }
-        """)
-        self.append("[INFO] Terminal de salida inicializada.")
-        self.append("[INFO] Esperando selección de proyecto...\n")
-
-    def write_output(self, text):
-        """Método para escribir salida programática (logs) con soporte ANSI."""
-        from PyQt5.QtGui import QTextCharFormat, QColor
-        
-        # Mover al final
-        cursor = self.textCursor()
-        cursor.movePosition(cursor.End)
-        
-        # Si no estamos en una línea nueva, insertar salto
-        if cursor.positionInBlock() > 0:
-            cursor.insertText("\n")
-        
-        # Parsear y aplicar colores ANSI
-        ansi_pattern = re.compile(r'\[([A-ZÉÍ]+)\]')
-        parts = ansi_pattern.split(text)
-        
-        for i, part in enumerate(parts):
-            if i % 2 == 0:
-                # Texto normal
-                cursor.insertText(part)
-            else:
-                # Es un tag de color
-                fmt = QTextCharFormat()
-                fmt.setFontWeight(700)  # Bold
-                
-                if part == "INFO":
-                    fmt.setForeground(QColor("#3B9CFF"))  # Azul
-                    cursor.insertText(f"[{part}]", fmt)
-                elif part in ["OK", "ÉXITO"]:
-                    fmt.setForeground(QColor("#00D26A"))  # Verde
-                    cursor.insertText(f"[{part}]", fmt)
-                elif part == "WARN":
-                    fmt.setForeground(QColor("#FFB627"))  # Amarillo
-                    cursor.insertText(f"[{part}]", fmt)
-                elif part in ["ERROR", "CRÍTICO"]:
-                    fmt.setForeground(QColor("#FF4444"))  # Rojo
-                    cursor.insertText(f"[{part}]", fmt)
-                else:
-                    cursor.insertText(f"[{part}]")
-        
-        self.setTextCursor(cursor)
-        self.ensureCursorVisible()
-
-class CompilerGUI(QMainWindow):
-    """Interfaz gráfica estilo Windows 11 para el compilador."""
-    def __init__(self):
-        super().__init__()
-        self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowSystemMenuHint)
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.resize(950, 650)
-        
-        self.repo_path = ""
-        self.output_path = ""
-        self.compiler_thread = None
-        
-        self.init_ui()
-        
-        # Redirigir stdout
-        self.redirector = StreamRedirector()
-        self.redirector.text_written.connect(self.append_log)
-        sys.stdout = self.redirector
-        sys.stderr = self.redirector
-
-    def init_ui(self):
-        # Widget central (Fondo Mica simulado)
-        self.central_widget = QWidget()
-        self.central_widget.setObjectName("CentralWidget")
-        self.central_widget.setStyleSheet("""
-            #CentralWidget {
-                background-color: #202020;
-                border: 1px solid #333333;
-                border-radius: 8px;
-            }
-            QLabel { color: #FFFFFF; font-family: 'Segoe UI Variable Display'; }
-            QTextEdit { 
-                background-color: #0C0C0C; 
-                border-radius: 4px; 
-                border: 1px solid #333333;
-                padding: 10px;
-                color: #CCCCCC;
-                font-family: 'Consolas';
-                font-size: 13px;
-            }
-        """)
-        self.setCentralWidget(self.central_widget)
-        
-        # Layout principal
-        main_layout = QVBoxLayout(self.central_widget)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
-
-        # --- Barra de Título ---
-        title_bar = QHBoxLayout()
-        title_bar.setContentsMargins(16, 0, 0, 0)
-        title_bar.setSpacing(0)
-        
-        # Icono y Título
-        app_icon = QSvgWidget("assets/ui/win11_terminal.svg")
-        app_icon.setFixedSize(16, 16)
-        title_bar.addWidget(app_icon)
-        
-        title_bar.addSpacing(12)
-        
-        title_label = QLabel("Flarm Package Compiler")
-        title_label.setFont(QFont("Segoe UI Variable Display", 9))
-        title_label.setStyleSheet("color: #FFFFFF;")
-        title_bar.addWidget(title_label)
-        
-        title_bar.addStretch()
-        
-        # Botones de ventana
-        min_btn = TitleBarButton("assets/ui/win11_min.svg")
-        min_btn.clicked.connect(self.showMinimized)
-        
-        self.max_btn = TitleBarButton("assets/ui/win11_max.svg")
-        self.max_btn.clicked.connect(self.toggle_maximized)
-        
-        close_btn = TitleBarButton("assets/ui/win11_close.svg", is_close=True)
-        close_btn.clicked.connect(self.close)
-        
-        title_bar.addWidget(min_btn)
-        title_bar.addWidget(self.max_btn)
-        title_bar.addWidget(close_btn)
-        
-        # Contenedor de la barra de título para eventos de arrastre
-        self.title_bar_widget = QWidget()
-        self.title_bar_widget.setLayout(title_bar)
-        self.title_bar_widget.setFixedHeight(32)
-        main_layout.addWidget(self.title_bar_widget)
-
-        # --- Área de Contenido ---
-        content_layout = QHBoxLayout()
-        content_layout.setContentsMargins(24, 12, 24, 24)
-        content_layout.setSpacing(24)
-        
-        # Panel Izquierdo (Configuración)
-        left_panel = QVBoxLayout()
-        left_panel.setSpacing(20)
-        
-        # Header Sección
-        config_header = QLabel("Configuración")
-        config_header.setFont(QFont("Segoe UI Variable Display", 14, QFont.Bold))
-        left_panel.addWidget(config_header)
-
-        # Grupo Repositorio
-        repo_group = QVBoxLayout()
-        repo_group.setSpacing(8)
-        repo_label = QLabel("Repositorio de Origen")
-        repo_label.setStyleSheet("color: #CCCCCC; font-size: 13px;")
-        repo_group.addWidget(repo_label)
-        
-        repo_row = QHBoxLayout()
-        self.repo_display = QLabel("Seleccionar carpeta...")
-        self.repo_display.setStyleSheet("""
-            background-color: #2D2D2D; 
-            border-radius: 4px; 
-            padding: 8px 12px; 
-            color: #AAAAAA;
-            border: 1px solid #3D3D3D;
-        """)
-        self.repo_display.setFixedHeight(36)
-        repo_row.addWidget(self.repo_display, 1)
-        
-        repo_btn = Win11Button("Examinar", is_primary=False)
-        repo_btn.setIcon(QIcon("assets/ui/win11_folder.svg"))
-        repo_btn.clicked.connect(self.select_repo)
-        repo_row.addWidget(repo_btn)
-        
-        repo_group.addLayout(repo_row)
-        left_panel.addLayout(repo_group)
-        
-        # Grupo Salida
-        out_group = QVBoxLayout()
-        out_group.setSpacing(8)
-        out_label = QLabel("Directorio de Salida")
-        out_label.setStyleSheet("color: #CCCCCC; font-size: 13px;")
-        out_group.addWidget(out_label)
-        
-        out_row = QHBoxLayout()
-        self.out_display = QLabel("./releases")
-        self.out_display.setStyleSheet("""
-            background-color: #2D2D2D; 
-            border-radius: 4px; 
-            padding: 8px 12px; 
-            color: #FFFFFF;
-            border: 1px solid #3D3D3D;
-        """)
-        self.out_display.setFixedHeight(36)
-        out_row.addWidget(self.out_display, 1)
-        
-        out_btn = Win11Button("Cambiar", is_primary=False)
-        out_btn.setIcon(QIcon("assets/ui/win11_folder.svg"))
-        out_btn.clicked.connect(self.select_output)
-        out_row.addWidget(out_btn)
-        
-        out_group.addLayout(out_row)
-        left_panel.addLayout(out_group)
-        
-        left_panel.addStretch()
-        
-        # Botón Compilar
-        self.compile_btn = Win11Button("Iniciar Compilación", is_primary=True)
-        self.compile_btn.setFixedHeight(40)
-        self.compile_btn.setFont(QFont("Segoe UI Variable Display", 10, QFont.Bold))
-        self.compile_btn.clicked.connect(self.start_compilation)
-        self.compile_btn.setEnabled(False)
-        left_panel.addWidget(self.compile_btn)
-        
-        # Barra de Progreso
-        self.progress_bar = QProgressBar()
-        self.progress_bar.setFixedHeight(6)
-        self.progress_bar.setTextVisible(False)
-        self.progress_bar.setStyleSheet("""
-            QProgressBar {
-                background-color: #2D2D2D;
-                border-radius: 3px;
-                border: none;
-            }
-            QProgressBar::chunk {
-                background-color: #0078D4;
-                border-radius: 3px;
-            }
-        """)
-        self.progress_bar.setRange(0, 100)
-        self.progress_bar.setValue(0)
-        left_panel.addWidget(self.progress_bar)
-
-        content_layout.addLayout(left_panel, 3)
-
-        # Panel Derecho (Terminal)
-        right_panel = QVBoxLayout()
-        right_panel.setSpacing(12)
-        
-        log_header = QLabel("Salida de Terminal")
-        log_header.setFont(QFont("Segoe UI Variable Display", 14, QFont.Bold))
-        right_panel.addWidget(log_header)
-        
-        self.log_area = OutputTerminal()
-        right_panel.addWidget(self.log_area)
-        
-        content_layout.addLayout(right_panel, 7)
-        
-        main_layout.addLayout(content_layout)
-
-        # Permitir mover la ventana desde la barra de título
-        self.old_pos = None
-
-    def toggle_maximized(self):
-        """Alterna entre ventana maximizada y normal."""
-        if self.isMaximized():
-            self.showNormal()
-        else:
-            self.showMaximized()
-
-    def changeEvent(self, event):
-        """Maneja cambios de estado de la ventana."""
-        if event.type() == QEvent.WindowStateChange:
-            if self.isMaximized():
-                # Sin bordes cuando está maximizada
-                self.central_widget.setStyleSheet("""
-                    #CentralWidget {
-                        background-color: #202020;
-                        border: none;
-                        border-radius: 0px;
-                    }
-                    QLabel { color: #FFFFFF; font-family: 'Segoe UI Variable Display'; }
-                    QTextEdit { 
-                        background-color: #0C0C0C; 
-                        border-radius: 4px; 
-                        border: 1px solid #333333;
-                        padding: 10px;
-                        color: #CCCCCC;
-                        font-family: 'Consolas';
-                        font-size: 13px;
-                    }
-                """)
-            else:
-                # Con bordes cuando está en modo normal
-                self.central_widget.setStyleSheet("""
-                    #CentralWidget {
-                        background-color: #202020;
-                        border: 1px solid #333333;
-                        border-radius: 8px;
-                    }
-                    QLabel { color: #FFFFFF; font-family: 'Segoe UI Variable Display'; }
-                    QTextEdit { 
-                        background-color: #0C0C0C; 
-                        border-radius: 4px; 
-                        border: 1px solid #333333;
-                        padding: 10px;
-                        color: #CCCCCC;
-                        font-family: 'Consolas';
-                        font-size: 13px;
-                    }
-                """)
-        super().changeEvent(event)
-
-    def mousePressEvent(self, event):
-        # Solo permitir arrastrar desde la barra superior (aprox 40px)
-        if event.button() == Qt.LeftButton and event.y() < 40:
-            self.old_pos = event.globalPos()
-
-    def mouseMoveEvent(self, event):
-        if self.old_pos:
+        def write(self, text):
             delta = QPoint(event.globalPos() - self.old_pos)
             self.move(self.x() + delta.x(), self.y() + delta.y())
             self.old_pos = event.globalPos()

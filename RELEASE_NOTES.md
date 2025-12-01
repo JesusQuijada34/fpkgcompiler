@@ -30,34 +30,6 @@ El compilador ahora verifica la disponibilidad de PyInstaller antes de iniciar l
 
 O si no está instalado:
 
-```
-[INFO] PyInstaller no encontrado: [Errno 2] No such file or directory: 'pyinstaller'
-[INFO] PyInstaller no encontrado. Iniciando instalación automática...
-```
-
-#### 2. Instalación Automática en Linux
-
-Cuando PyInstaller no está disponible en Linux, el compilador ejecuta automáticamente:
-
-```
-[INFO] 🔧 Instalando PyInstaller en Linux...
-[INFO] 🔧 Instalando python3-full, python3-venv y pipx...
-[OK] ✅ Dependencias del sistema instaladas
-[INFO] 🔧 Configurando pipx...
-[INFO] 🧪 Creando entorno virtual en /home/usuario/venv-pyinstaller...
-[OK] ✅ Entorno virtual creado
-[INFO] 📦 Actualizando pip...
-[INFO] 📦 Instalando PyInstaller...
-[OK] ✅ PyInstaller instalado
-[OK] ✅ PyInstaller instalado correctamente. Versión: 6.3.0
-[INFO] 🎉 Entorno listo. PyInstaller disponible en el entorno virtual.
-```
-
-#### 3. Uso del Entorno Virtual
-
-Una vez instalado, todas las compilaciones utilizan automáticamente el PyInstaller del entorno virtual, garantizando consistencia y aislamiento.
-
-## 🚀 Guía de Uso
 
 ### En Linux (Primera Vez)
 
