@@ -55,6 +55,177 @@ try:
 except ImportError:
     HAS_PYQT5 = False
 
+class InteractiveFolderSelector:
+    """Selector de carpetas interactivo multiplataforma (Windows/Linux)."""
+    def __init__(self):
+        self.current_path = Path(os.getcwd()).resolve()
+        self.selected_idx = 0
+        self.message = ""
+
+    def _get_key(self):
+        """Lee una tecla pulsada sin esperar enter (Cross-platform)."""
+        if os.name == 'nt':
+            import msvcrt
+            key = msvcrt.getch()
+            if key == b'\xe0': # Arrow keys prefix
+                key = msvcrt.getch()
+                if key == b'H': return 'UP'
+                if key == b'P': return 'DOWN'
+            if key == b'\r': return 'ENTER'
+            if key == b' ': return 'SPACE'
+            if key == b'\x08': return 'BACKSPACE'
+            if key == b'\x1b': return 'ESC'
+            return None
+        else:
+            import tty, termios
+            fd = sys.stdin.fileno()
+            old_settings = termios.tcgetattr(fd)
+            try:
+                tty.setraw(sys.stdin.fileno())
+                ch = sys.stdin.read(1)
+                if ch == '\x1b': # Escape sequence
+                    seq = sys.stdin.read(2)
+                    if seq == '[A': return 'UP'
+                    if seq == '[B': return 'DOWN'
+                    return 'ESC'
+                if ch == '\r': return 'ENTER'
+                if ch == ' ': return 'SPACE'
+                if ch == '\x7f': return 'BACKSPACE' # Backspace on Mac/Linux often 127
+                return None
+            finally:
+                termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+    def get_subdirs(self):
+        # Retorna lista de tuplas (nombre_mostrar, objeto_path, es_accion)
+        items = []
+        # Opción para seleccionar el directorio actual
+        items.append(("[ SELECCIONAR ESTA CARPETA ]", self.current_path, True))
+        
+        # Opción para subir de nivel
+        if self.current_path.parent != self.current_path:
+            items.append((".. (Subir nivel)", self.current_path.parent, False))
+            
+        # Subdirectorios
+        try:
+            for d in sorted([d for d in self.current_path.iterdir() if d.is_dir() and not d.name.startswith('.')], key=lambda x: x.name):
+                items.append((d.name, d, False))
+        except Exception as e:
+            self.message = f"[ERROR] No se puede leer directorio: {e}"
+            
+        return items
+
+    def run(self) -> Optional[Path]:
+        while True:
+            # Limpiar pantalla cross-platform
+            os.system('cls' if os.name == 'nt' else 'clear')
+            
+            print("==========================================")
+            print("   SELECTOR DE PROYECTO FLANGCOMPILER")
+            print("==========================================")
+            print(f"Ruta Actual: {self.current_path}")
+            print("------------------------------------------")
+            print("[ARRIBA/ABAJO] Navegar   [ENTER] Accionar")
+            print("[ESC] Salir")
+            print("------------------------------------------")
+
+            items = self.get_subdirs()
+            
+            # Ajustar índice si cambia la lista
+            if self.selected_idx >= len(items):
+                self.selected_idx = len(items) - 1
+            
+            # Paginación simple
+            max_lines = 15
+            start = 0
+            if self.selected_idx > max_lines - 1:
+                start = self.selected_idx - (max_lines - 1)
+            
+            visible_items = items[start : start + max_lines]
+
+            for i, item in enumerate(visible_items):
+                name, path, is_action = item
+                real_idx = start + i
+                prefix = " > " if real_idx == self.selected_idx else "   "
+                print(f"{prefix}{name}")
+            
+            print("------------------------------------------")
+            if self.message:
+                print(self.message)
+
+            key = self._get_key()
+            
+            if key == 'UP':
+                self.selected_idx = max(0, self.selected_idx - 1)
+            elif key == 'DOWN':
+                self.selected_idx = min(len(items) - 1, self.selected_idx + 1)
+            elif key == 'ENTER':
+                name, path, is_action = items[self.selected_idx]
+                
+                if is_action:
+                    # Es la acción de seleccionar actual
+                    # Verificar details.xml
+                    if (path / "details.xml").exists():
+                        return path
+                    else:
+                        self.message = "[!] Advertencia: No se detectó details.xml aquí. Pulsa ENTER de nuevo para confirmar."
+                        # Hack simple para confirmación: si el mensaje ya es ese, retornamos
+                        if self.message == "[!] Advertencia: No se detectó details.xml aquí. Pulsa ENTER de nuevo para confirmar.":
+                             return path
+                        return path # Retornamos de una vez por ahora para no complicar
+                else:
+                    # Es navegación (subir o bajar)
+                    self.current_path = path
+                    self.selected_idx = 0
+                    self.message = ""
+                    
+            elif key == 'ESC':
+                return None
+
+def update_project_files(repo_path: Path):
+    """Actualiza README.md, CHANGELOG.md, RELEASE_NOTES.md y lib/requirements.txt."""
+    print(f"[INFO] Actualizando archivos del proyecto en {repo_path}...")
+    
+    # 1. Update requirements.txt
+    lib_dir = repo_path / "lib"
+    lib_dir.mkdir(exist_ok=True)
+    req_file = lib_dir / "requirements.txt"
+    
+    imports = set()
+    for py_file in repo_path.glob("**/*.py"):
+        if "venv" in str(py_file) or ".git" in str(py_file): continue
+        try:
+            with open(py_file, 'r', encoding='utf-8', errors='ignore') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith("import ") or line.startswith("from "):
+                        parts = line.split()
+                        if len(parts) > 1:
+                            module = parts[1].split('.')[0]
+                            # Filtro básico de stdlib
+                            if module not in ['os', 'sys', 're', 'json', 'pathlib', 'subprocess', 'threading', 'platform', 'shutil', 'typing', 'urllib', 'ssl', 'tempfile', 'xml', 'PyQt5']: 
+                                imports.add(module)
+        except: pass
+    
+    try:
+        with open(req_file, 'w', encoding='utf-8') as f:
+            for imp in sorted(imports):
+                f.write(f"{imp}\n")
+        print(f"[OK] lib/requirements.txt actualizado ({len(imports)} dependencias detectadas).")
+    except Exception as e:
+        print(f"[WARN] No se pudo actualizar requirements.txt: {e}")
+
+    # 2. Update MD files (Asegurar existencia)
+    for md in ["README.md", "CHANGELOG.md", "RELEASE_NOTES.md"]:
+        md_path = repo_path / md
+        if not md_path.exists():
+            try:
+                with open(md_path, 'w', encoding='utf-8') as f:
+                    f.write(f"# {md[:-3]}\n\nGenerado automáticamente por FlangCompiler IT.\n")
+                print(f"[OK] {md} creado.")
+            except: pass
+        else:
+            print(f"[OK] {md} verificado.")
+
 class FlangCompiler:
     """Compilador principal unificado para el ecosistema Flarm."""
 
@@ -802,201 +973,604 @@ if HAS_PYQT5:
         text_written = pyqtSignal(str)
 
         def write(self, text):
-            delta = QPoint(event.globalPos() - self.old_pos)
-            self.move(self.x() + delta.x(), self.y() + delta.y())
-            self.old_pos = event.globalPos()
+            self.text_written.emit(str(text))
 
-    def mouseReleaseEvent(self, event):
-        if event.button() == Qt.LeftButton:
+        def flush(self):
+            pass
+
+    class Win11Button(QPushButton):
+        """Botón estilo Windows 11 (Accent Color)."""
+        def __init__(self, text, parent=None, is_primary=True):
+            super().__init__(text, parent)
+            self.setCursor(Qt.PointingHandCursor)
+            self.setFixedHeight(36)
+            self.setFont(QFont("Segoe UI Variable Display", 9))
+            
+            self.is_primary = is_primary
+            self.update_style()
+
+        def update_style(self):
+            if self.is_primary:
+                # Estilo Accent (Azul)
+                self.setStyleSheet("""
+                    QPushButton {
+                        background-color: #0078D4;
+                        color: white;
+                        border-radius: 4px;
+                        border: 1px solid #0078D4;
+                        padding: 0 16px;
+                    }
+                    QPushButton:hover {
+                        background-color: #1084D9;
+                        border: 1px solid #1084D9;
+                    }
+                    QPushButton:pressed {
+                        background-color: #006CC1;
+                        border: 1px solid #006CC1;
+                    }
+                    QPushButton:disabled {
+                        background-color: #333333;
+                        color: #888888;
+                        border: 1px solid #333333;
+                    }
+                """)
+            else:
+                # Estilo Standard (Gris Oscuro)
+                self.setStyleSheet("""
+                    QPushButton {
+                        background-color: #2D2D2D;
+                        color: white;
+                        border-radius: 4px;
+                        border: 1px solid #3D3D3D;
+                        padding: 0 16px;
+                    }
+                    QPushButton:hover {
+                        background-color: #3D3D3D;
+                        border: 1px solid #4D4D4D;
+                    }
+                    QPushButton:pressed {
+                        background-color: #262626;
+                        border: 1px solid #262626;
+                    }
+                """)
+
+    class TitleBarButton(QPushButton):
+        """Botón de barra de título (Min, Max, Close)."""
+        def __init__(self, icon_path, parent=None, is_close=False):
+            super().__init__(parent)
+            self.setFixedSize(46, 32)
+            self.setIcon(QIcon(icon_path))
+            self.setIconSize(QSize(10, 10))
+            self.setStyleSheet("""
+                QPushButton {
+                    background-color: transparent;
+                    border: none;
+                }
+                QPushButton:hover {
+                    background-color: %s;
+                }
+                QPushButton:pressed {
+                    background-color: %s;
+                }
+            """ % ("#C42B1C" if is_close else "#333333", "#B32415" if is_close else "#262626"))
+
+    class OutputTerminal(QTextEdit):
+        """Terminal de solo salida para logs del compilador."""
+
+        def __init__(self, parent=None):
+            super().__init__(parent)
+            self.setReadOnly(True)  # Solo lectura
+            self.setStyleSheet("""
+                QTextEdit { 
+                    background-color: #012456; 
+                    border-radius: 4px; 
+                    border: 1px solid #333333;
+                    padding: 10px;
+                    color: #CCCCCC;
+                    font-family: 'Consolas', 'Lucida Console', monospace;
+                    font-size: 14px;
+                }
+            """)
+            self.append("[INFO] Terminal de salida inicializada.")
+            self.append("[INFO] Esperando selección de proyecto...\n")
+
+        def write_output(self, text):
+            """Método para escribir salida programática (logs) con soporte ANSI."""
+            from PyQt5.QtGui import QTextCharFormat, QColor
+            
+            # Mover al final
+            cursor = self.textCursor()
+            cursor.movePosition(cursor.End)
+            
+            # Si no estamos en una línea nueva, insertar salto
+            if cursor.positionInBlock() > 0:
+                cursor.insertText("\n")
+            
+            # Parsear y aplicar colores ANSI
+            ansi_pattern = re.compile(r'\[([A-ZÉÍ]+)\]')
+            parts = ansi_pattern.split(text)
+            
+            for i, part in enumerate(parts):
+                if i % 2 == 0:
+                    # Texto normal
+                    cursor.insertText(part)
+                else:
+                    # Es un tag de color
+                    fmt = QTextCharFormat()
+                    fmt.setFontWeight(700)  # Bold
+                    
+                    if part == "INFO":
+                        fmt.setForeground(QColor("#3B9CFF"))  # Azul
+                        cursor.insertText(f"[{part}]", fmt)
+                    elif part in ["OK", "ÉXITO"]:
+                        fmt.setForeground(QColor("#00D26A"))  # Verde
+                        cursor.insertText(f"[{part}]", fmt)
+                    elif part == "WARN":
+                        fmt.setForeground(QColor("#FFB627"))  # Amarillo
+                        cursor.insertText(f"[{part}]", fmt)
+                    elif part in ["ERROR", "CRÍTICO"]:
+                        fmt.setForeground(QColor("#FF4444"))  # Rojo
+                        cursor.insertText(f"[{part}]", fmt)
+                    else:
+                        cursor.insertText(f"[{part}]")
+            
+            self.setTextCursor(cursor)
+            self.ensureCursorVisible()
+
+    class CompilerGUI(QMainWindow):
+        """Interfaz gráfica estilo Windows 11 para el compilador."""
+        def __init__(self):
+            super().__init__()
+            self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowSystemMenuHint)
+            self.setAttribute(Qt.WA_TranslucentBackground)
+            self.resize(950, 650)
+            
+            self.repo_path = ""
+            self.output_path = ""
+            self.compiler_thread = None
+            
+            self.init_ui()
+            
+            # Redirigir stdout
+            self.redirector = StreamRedirector()
+            self.redirector.text_written.connect(self.append_log)
+            sys.stdout = self.redirector
+            sys.stderr = self.redirector
+
+        def init_ui(self):
+            # Widget central (Fondo Mica simulado)
+            self.central_widget = QWidget()
+            self.central_widget.setObjectName("CentralWidget")
+            self.central_widget.setStyleSheet("""
+                #CentralWidget {
+                    background-color: #202020;
+                    border: 1px solid #333333;
+                    border-radius: 8px;
+                }
+                QLabel { color: #FFFFFF; font-family: 'Segoe UI Variable Display'; }
+                QTextEdit { 
+                    background-color: #0C0C0C; 
+                    border-radius: 4px; 
+                    border: 1px solid #333333;
+                    padding: 10px;
+                    color: #CCCCCC;
+                    font-family: 'Consolas';
+                    font-size: 13px;
+                }
+            """)
+            self.setCentralWidget(self.central_widget)
+            
+            # Layout principal
+            main_layout = QVBoxLayout(self.central_widget)
+            main_layout.setContentsMargins(0, 0, 0, 0)
+            main_layout.setSpacing(0)
+
+            # --- Barra de Título ---
+            title_bar = QHBoxLayout()
+            title_bar.setContentsMargins(16, 0, 0, 0)
+            title_bar.setSpacing(0)
+            
+            # Icono y Título
+            app_icon = QSvgWidget("assets/ui/win11_terminal.svg")
+            app_icon.setFixedSize(16, 16)
+            title_bar.addWidget(app_icon)
+            
+            title_bar.addSpacing(12)
+            
+            title_label = QLabel("Flarm Package Compiler")
+            title_label.setFont(QFont("Segoe UI Variable Display", 9))
+            title_label.setStyleSheet("color: #FFFFFF;")
+            title_bar.addWidget(title_label)
+            
+            title_bar.addStretch()
+            
+            # Botones de ventana
+            min_btn = TitleBarButton("assets/ui/win11_min.svg")
+            min_btn.clicked.connect(self.showMinimized)
+            
+            self.max_btn = TitleBarButton("assets/ui/win11_max.svg")
+            self.max_btn.clicked.connect(self.toggle_maximized)
+            
+            close_btn = TitleBarButton("assets/ui/win11_close.svg", is_close=True)
+            close_btn.clicked.connect(self.close)
+            
+            title_bar.addWidget(min_btn)
+            title_bar.addWidget(self.max_btn)
+            title_bar.addWidget(close_btn)
+            
+            # Contenedor de la barra de título para eventos de arrastre
+            self.title_bar_widget = QWidget()
+            self.title_bar_widget.setLayout(title_bar)
+            self.title_bar_widget.setFixedHeight(32)
+            main_layout.addWidget(self.title_bar_widget)
+
+            # --- Área de Contenido ---
+            content_layout = QHBoxLayout()
+            content_layout.setContentsMargins(24, 12, 24, 24)
+            content_layout.setSpacing(24)
+            
+            # Panel Izquierdo (Configuración)
+            left_panel = QVBoxLayout()
+            left_panel.setSpacing(20)
+            
+            # Header Sección
+            config_header = QLabel("Configuración")
+            config_header.setFont(QFont("Segoe UI Variable Display", 14, QFont.Bold))
+            left_panel.addWidget(config_header)
+
+            # Grupo Repositorio
+            repo_group = QVBoxLayout()
+            repo_group.setSpacing(8)
+            repo_label = QLabel("Repositorio de Origen")
+            repo_label.setStyleSheet("color: #CCCCCC; font-size: 13px;")
+            repo_group.addWidget(repo_label)
+            
+            repo_row = QHBoxLayout()
+            self.repo_display = QLabel("Seleccionar carpeta...")
+            self.repo_display.setStyleSheet("""
+                background-color: #2D2D2D; 
+                border-radius: 4px; 
+                padding: 8px 12px; 
+                color: #AAAAAA;
+                border: 1px solid #3D3D3D;
+            """)
+            self.repo_display.setFixedHeight(36)
+            repo_row.addWidget(self.repo_display, 1)
+            
+            repo_btn = Win11Button("Examinar", is_primary=False)
+            repo_btn.setIcon(QIcon("assets/ui/win11_folder.svg"))
+            repo_btn.clicked.connect(self.select_repo)
+            repo_row.addWidget(repo_btn)
+            
+            repo_group.addLayout(repo_row)
+            left_panel.addLayout(repo_group)
+            
+            # Grupo Salida
+            out_group = QVBoxLayout()
+            out_group.setSpacing(8)
+            out_label = QLabel("Directorio de Salida")
+            out_label.setStyleSheet("color: #CCCCCC; font-size: 13px;")
+            out_group.addWidget(out_label)
+            
+            out_row = QHBoxLayout()
+            self.out_display = QLabel("./releases")
+            self.out_display.setStyleSheet("""
+                background-color: #2D2D2D; 
+                border-radius: 4px; 
+                padding: 8px 12px; 
+                color: #FFFFFF;
+                border: 1px solid #3D3D3D;
+            """)
+            self.out_display.setFixedHeight(36)
+            out_row.addWidget(self.out_display, 1)
+            
+            out_btn = Win11Button("Cambiar", is_primary=False)
+            out_btn.setIcon(QIcon("assets/ui/win11_folder.svg"))
+            out_btn.clicked.connect(self.select_output)
+            out_row.addWidget(out_btn)
+            
+            out_group.addLayout(out_row)
+            left_panel.addLayout(out_group)
+            
+            left_panel.addStretch()
+            
+            # Botón Compilar
+            self.compile_btn = Win11Button("Iniciar Compilación", is_primary=True)
+            self.compile_btn.setFixedHeight(40)
+            self.compile_btn.setFont(QFont("Segoe UI Variable Display", 10, QFont.Bold))
+            self.compile_btn.clicked.connect(self.start_compilation)
+            self.compile_btn.setEnabled(False)
+            left_panel.addWidget(self.compile_btn)
+            
+            # Barra de Progreso
+            self.progress_bar = QProgressBar()
+            self.progress_bar.setFixedHeight(6)
+            self.progress_bar.setTextVisible(False)
+            self.progress_bar.setStyleSheet("""
+                QProgressBar {
+                    background-color: #2D2D2D;
+                    border-radius: 3px;
+                    border: none;
+                }
+                QProgressBar::chunk {
+                    background-color: #0078D4;
+                    border-radius: 3px;
+                }
+            """)
+            self.progress_bar.setRange(0, 100)
+            self.progress_bar.setValue(0)
+            left_panel.addWidget(self.progress_bar)
+
+            content_layout.addLayout(left_panel, 3)
+
+            # Panel Derecho (Terminal)
+            right_panel = QVBoxLayout()
+            right_panel.setSpacing(12)
+            
+            log_header = QLabel("Salida de Terminal")
+            log_header.setFont(QFont("Segoe UI Variable Display", 14, QFont.Bold))
+            right_panel.addWidget(log_header)
+            
+            self.log_area = OutputTerminal()
+            right_panel.addWidget(self.log_area)
+            
+            content_layout.addLayout(right_panel, 7)
+            
+            main_layout.addLayout(content_layout)
+
+            # Permitir mover la ventana desde la barra de título
             self.old_pos = None
 
-    def validate_project_xml(self, repo_path):
-        """Valida que el proyecto tenga un details.xml válido con todos los campos requeridos."""
-        details_xml = Path(repo_path) / "details.xml"
-        
-        if not details_xml.exists():
-            self.log("[ERROR] No se encontró el archivo details.xml en el proyecto.")
-            self.log("[ERROR] El proyecto fue rechazado.")
-            return False
-        
-        try:
-            tree = ET.parse(details_xml)
-            root = tree.getroot()
+        def toggle_maximized(self):
+            """Alterna entre ventana maximizada y normal."""
+            if self.isMaximized():
+                self.showNormal()
+            else:
+                self.showMaximized()
+
+        def changeEvent(self, event):
+            """Maneja cambios de estado de la ventana."""
+            if event.type() == QEvent.WindowStateChange:
+                if self.isMaximized():
+                    # Sin bordes cuando está maximizada
+                    self.central_widget.setStyleSheet("""
+                        #CentralWidget {
+                            background-color: #202020;
+                            border: none;
+                            border-radius: 0px;
+                        }
+                        QLabel { color: #FFFFFF; font-family: 'Segoe UI Variable Display'; }
+                        QTextEdit { 
+                            background-color: #0C0C0C; 
+                            border-radius: 4px; 
+                            border: 1px solid #333333;
+                            padding: 10px;
+                            color: #CCCCCC;
+                            font-family: 'Consolas';
+                            font-size: 13px;
+                        }
+                    """)
+                else:
+                    # Con bordes cuando está en modo normal
+                    self.central_widget.setStyleSheet("""
+                        #CentralWidget {
+                            background-color: #202020;
+                            border: 1px solid #333333;
+                            border-radius: 8px;
+                        }
+                        QLabel { color: #FFFFFF; font-family: 'Segoe UI Variable Display'; }
+                        QTextEdit { 
+                            background-color: #0C0C0C; 
+                            border-radius: 4px; 
+                            border: 1px solid #333333;
+                            padding: 10px;
+                            color: #CCCCCC;
+                            font-family: 'Consolas';
+                            font-size: 13px;
+                        }
+                    """)
+            super().changeEvent(event)
+
+        def mousePressEvent(self, event):
+            # Solo permitir arrastrar desde la barra superior (aprox 40px)
+            if event.button() == Qt.LeftButton and event.y() < 40:
+                self.old_pos = event.globalPos()
+
+        def mouseMoveEvent(self, event):
+            if self.old_pos:
+                delta = QPoint(event.globalPos() - self.old_pos)
+                self.move(self.x() + delta.x(), self.y() + delta.y())
+                self.old_pos = event.globalPos()
+
+        def mouseReleaseEvent(self, event):
+            if event.button() == Qt.LeftButton:
+                self.old_pos = None
+
+        def validate_project_xml(self, repo_path):
+            """Valida que el proyecto tenga un details.xml válido con todos los campos requeridos."""
+            details_xml = Path(repo_path) / "details.xml"
             
-            # Verificar que el root sea <app>
-            if root.tag != 'app':
-                self.log("[ERROR] El archivo details.xml debe tener <app> como elemento raíz.")
+            if not details_xml.exists():
+                self.log("[ERROR] No se encontró el archivo details.xml en el proyecto.")
                 self.log("[ERROR] El proyecto fue rechazado.")
                 return False
             
-            # Campos requeridos según la estructura real
-            required_fields = {
-                'publisher': 'Editor/Publicador',
-                'app': 'Nombre de la aplicación',
-                'name': 'Nombre completo',
-                'version': 'Versión',
-                'correlationid': 'ID de correlación',
-                'rate': 'Clasificación',
-                'author': 'Autor',
-                'platform': 'Plataforma'
-            }
-            
-            missing_fields = []
-            empty_fields = []
-            
-            for field, description in required_fields.items():
-                element = root.find(field)
-                if element is None:
-                    missing_fields.append(f"  - {field} ({description})")
-                elif not element.text or element.text.strip() == "":
-                    empty_fields.append(f"  - {field} ({description})")
-            
-            if missing_fields or empty_fields:
-                self.log("[ERROR] El archivo details.xml está incompleto:")
-                if missing_fields:
-                    self.log("[ERROR] Campos faltantes:")
-                    for field in missing_fields:
-                        self.log(f"[ERROR] {field}")
-                if empty_fields:
-                    self.log("[ERROR] Campos vacíos:")
-                    for field in empty_fields:
-                        self.log(f"[ERROR] {field}")
-                self.log("[ERROR] El proyecto fue rechazado.")
-                return False
-            
-            # Verificar que exista el script principal ({app}.py)
-            app_name = root.findtext('app', '').strip()
-            if app_name:
-                main_script = Path(repo_path) / f"{app_name}.py"
-                if not main_script.exists():
-                    self.log(f"[ERROR] No se encontró el script principal: {app_name}.py")
+            try:
+                tree = ET.parse(details_xml)
+                root = tree.getroot()
+                
+                # Verificar que el root sea <app>
+                if root.tag != 'app':
+                    self.log("[ERROR] El archivo details.xml debe tener <app> como elemento raíz.")
                     self.log("[ERROR] El proyecto fue rechazado.")
                     return False
-                else:
-                    self.log(f"[OK] Script principal encontrado: {app_name}.py")
-            
-            self.log("[OK] Validación de details.xml exitosa.")
-            self.log(f"[INFO] Proyecto: {root.findtext('name', 'Unknown')}")
-            self.log(f"[INFO] Versión: {root.findtext('version', 'Unknown')}")
-            self.log(f"[INFO] Plataforma: {root.findtext('platform', 'Unknown')}")
-            self.log(f"[INFO] Autor: {root.findtext('author', 'Unknown')}")
-            return True
-            
-        except ET.ParseError as e:
-            self.log(f"[ERROR] Error al parsear details.xml: {e}")
-            self.log("[ERROR] El archivo XML está mal formado.")
-            self.log("[ERROR] El proyecto fue rechazado.")
-            return False
-        except Exception as e:
-            self.log(f"[ERROR] Error inesperado al validar XML: {e}")
-            self.log("[ERROR] El proyecto fue rechazado.")
-            return False
-
-    def select_repo(self):
-        folder = QFileDialog.getExistingDirectory(self, "Seleccionar Repositorio")
-        if folder:
-            self.log(f"[INFO] Validando proyecto: {os.path.basename(folder)}")
-            
-            # Validar XML antes de aceptar el proyecto
-            if self.validate_project_xml(folder):
-                self.repo_path = folder
-                self.repo_display.setText(os.path.basename(folder))
-                self.repo_display.setStyleSheet("""
-                    background-color: #2D2D2D; 
-                    border-radius: 4px; 
-                    padding: 8px 12px; 
-                    color: #FFFFFF;
-                    border: 1px solid #3D3D3D;
-                """)
-                self.compile_btn.setEnabled(True)
-                self.log(f"[OK] Proyecto aceptado y listo para compilar.\n")
-            else:
-                self.repo_display.setText("Proyecto inválido - Seleccionar otro...")
-                self.repo_display.setStyleSheet("""
-                    background-color: #2D2D2D; 
-                    border-radius: 4px; 
-                    padding: 8px 12px; 
-                    color: #FF4444;
-                    border: 1px solid #FF4444;
-                """)
-                self.compile_btn.setEnabled(False)
-                self.log("[WARN] Por favor selecciona un proyecto válido.\n")
-
-    def select_output(self):
-        folder = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta de Salida")
-        if folder:
-            self.output_path = folder
-            self.out_display.setText(os.path.basename(folder))
-            self.log(f"Salida seleccionada: {folder}")
-
-    def log(self, message):
-        print(message) # Esto va al redirector
-
-    def append_log(self, text):
-        # Usar el método especial de la terminal
-        self.log_area.write_output(text)
-
-
-
-    def start_compilation(self):
-        # Esta función se supone que pertenece a una clase, pero estaba usando variables de ámbito global (como parser y args).
-        # Asumiremos que self.repo_path y self.output_path están definidos previamente en la clase.
-
-        # Aquí solo debe lanzar la compilación para GUI; no debe hacer lógica de CLI/argumentos
-        if not self.repo_path:
-            self.log("[ERROR] Debe seleccionar un proyecto primero.")
-            return
-
-        if not self.output_path:
-            self.output_path = Path("./releases").resolve()
-
-        # Aquí continúa con la compilación usando los paths seleccionados
-        self.log("[INFO] Iniciando compilación en GUI...")
-        
-        # Deshabilitar UI
-        self.compile_btn.setEnabled(False)
-        self.compile_btn.setText("Compilando...")
-        self.progress_bar.setValue(0)
-        
-        # Iniciar Worker
-        self.worker = CompilationWorker(self.repo_path, self.output_path)
-        self.worker.progress.connect(self.update_progress)
-        self.worker.finished.connect(self.compilation_finished)
-        self.worker.start()
-
-    def update_progress(self, value):
-        self.progress_bar.setValue(value)
-
-    def compilation_finished(self, success, result_path):
-        self.compile_btn.setEnabled(True)
-        self.compile_btn.setText("Iniciar Compilación")
-        
-        if success and result_path:
-            self.log("[OK] Compilación finalizada correctamente.")
-            self.progress_bar.setValue(100)
-            
-            # Preguntar dónde guardar el archivo final
-            save_path, _ = QFileDialog.getSaveFileName(
-                self, 
-                "Guardar Paquete Compilado", 
-                os.path.basename(result_path), 
-                "Flarm App Package (*.iflapp)"
-            )
-            
-            if save_path:
-                try:
-                    shutil.move(result_path, save_path)
-                    self.log(f"[INFO] Paquete guardado en: {save_path}")
-                    QMessageBox.information(self, "Éxito", f"Paquete guardado exitosamente en:\n{save_path}")
-                except Exception as e:
-                    self.log(f"[ERROR] No se pudo mover el archivo: {e}")
-                    QMessageBox.warning(self, "Error", f"No se pudo guardar el archivo en la ubicación seleccionada:\n{e}")
-            else:
-                self.log("[INFO] Guardado cancelado por el usuario. El archivo permanece en la carpeta de salida temporal.")
                 
-        else:
-            self.log("[ERROR] Error durante la compilación.")
+                # Campos requeridos según la estructura real
+                required_fields = {
+                    'publisher': 'Editor/Publicador',
+                    'app': 'Nombre de la aplicación',
+                    'name': 'Nombre completo',
+                    'version': 'Versión',
+                    'correlationid': 'ID de correlación',
+                    'rate': 'Clasificación',
+                    'author': 'Autor',
+                    'platform': 'Plataforma'
+                }
+                
+                missing_fields = []
+                empty_fields = []
+                
+                for field, description in required_fields.items():
+                    element = root.find(field)
+                    if element is None:
+                        missing_fields.append(f"  - {field} ({description})")
+                    elif not element.text or element.text.strip() == "":
+                        empty_fields.append(f"  - {field} ({description})")
+                
+                if missing_fields or empty_fields:
+                    self.log("[ERROR] El archivo details.xml está incompleto:")
+                    if missing_fields:
+                        self.log("[ERROR] Campos faltantes:")
+                        for field in missing_fields:
+                            self.log(f"[ERROR] {field}")
+                    if empty_fields:
+                        self.log("[ERROR] Campos vacíos:")
+                        for field in empty_fields:
+                            self.log(f"[ERROR] {field}")
+                    self.log("[ERROR] El proyecto fue rechazado.")
+                    return False
+                
+                # Verificar que exista el script principal ({app}.py)
+                app_name = root.findtext('app', '').strip()
+                if app_name:
+                    main_script = Path(repo_path) / f"{app_name}.py"
+                    if not main_script.exists():
+                        self.log(f"[ERROR] No se encontró el script principal: {app_name}.py")
+                        self.log("[ERROR] El proyecto fue rechazado.")
+                        return False
+                    else:
+                        self.log(f"[OK] Script principal encontrado: {app_name}.py")
+                
+                self.log("[OK] Validación de details.xml exitosa.")
+                self.log(f"[INFO] Proyecto: {root.findtext('name', 'Unknown')}")
+                self.log(f"[INFO] Versión: {root.findtext('version', 'Unknown')}")
+                self.log(f"[INFO] Plataforma: {root.findtext('platform', 'Unknown')}")
+                self.log(f"[INFO] Autor: {root.findtext('author', 'Unknown')}")
+                return True
+                
+            except ET.ParseError as e:
+                self.log(f"[ERROR] Error al parsear details.xml: {e}")
+                self.log("[ERROR] El archivo XML está mal formado.")
+                self.log("[ERROR] El proyecto fue rechazado.")
+                return False
+            except Exception as e:
+                self.log(f"[ERROR] Error inesperado al validar XML: {e}")
+                self.log("[ERROR] El proyecto fue rechazado.")
+                return False
+
+        def select_repo(self):
+            folder = QFileDialog.getExistingDirectory(self, "Seleccionar Repositorio")
+            if folder:
+                self.log(f"[INFO] Validando proyecto: {os.path.basename(folder)}")
+                
+                # Validar XML antes de aceptar el proyecto
+                if self.validate_project_xml(folder):
+                    self.repo_path = folder
+                    self.repo_display.setText(os.path.basename(folder))
+                    self.repo_display.setStyleSheet("""
+                        background-color: #2D2D2D; 
+                        border-radius: 4px; 
+                        padding: 8px 12px; 
+                        color: #FFFFFF;
+                        border: 1px solid #3D3D3D;
+                    """)
+                    self.compile_btn.setEnabled(True)
+                    self.log(f"[OK] Proyecto aceptado y listo para compilar.\n")
+                else:
+                    self.repo_display.setText("Proyecto inválido - Seleccionar otro...")
+                    self.repo_display.setStyleSheet("""
+                        background-color: #2D2D2D; 
+                        border-radius: 4px; 
+                        padding: 8px 12px; 
+                        color: #FF4444;
+                        border: 1px solid #FF4444;
+                    """)
+                    self.compile_btn.setEnabled(False)
+                    self.log("[WARN] Por favor selecciona un proyecto válido.\n")
+
+        def select_output(self):
+            folder = QFileDialog.getExistingDirectory(self, "Seleccionar Carpeta de Salida")
+            if folder:
+                self.output_path = folder
+                self.out_display.setText(os.path.basename(folder))
+                self.log(f"Salida seleccionada: {folder}")
+
+        def log(self, message):
+            print(message) # Esto va al redirector
+
+        def append_log(self, text):
+            # Usar el método especial de la terminal
+            self.log_area.write_output(text)
+
+        def start_compilation(self):
+            # Esta función se supone que pertenece a una clase, pero estaba usando variables de ámbito global (como parser y args).
+            # Asumiremos que self.repo_path y self.output_path están definidos previamente en la clase.
+
+            # Aquí solo debe lanzar la compilación para GUI; no debe hacer lógica de CLI/argumentos
+            if not self.repo_path:
+                self.log("[ERROR] Debe seleccionar un proyecto primero.")
+                return
+
+            if not self.output_path:
+                self.output_path = Path("./releases").resolve()
+
+            # Aquí continúa con la compilación usando los paths seleccionados
+            self.log("[INFO] Iniciando compilación en GUI...")
+            
+            # Deshabilitar UI
+            self.compile_btn.setEnabled(False)
+            self.compile_btn.setText("Compilando...")
             self.progress_bar.setValue(0)
+            
+            # Iniciar Worker
+            self.worker = CompilationWorker(self.repo_path, self.output_path)
+            self.worker.progress.connect(self.update_progress)
+            self.worker.finished.connect(self.compilation_finished)
+            self.worker.start()
+
+        def update_progress(self, value):
+            self.progress_bar.setValue(value)
+
+        def compilation_finished(self, success, result_path):
+            self.compile_btn.setEnabled(True)
+            self.compile_btn.setText("Iniciar Compilación")
+            
+            if success and result_path:
+                self.log("[OK] Compilación finalizada correctamente.")
+                self.progress_bar.setValue(100)
+                
+                # Preguntar dónde guardar el archivo final
+                save_path, _ = QFileDialog.getSaveFileName(
+                    self, 
+                    "Guardar Paquete Compilado", 
+                    os.path.basename(result_path), 
+                    "Flarm App Package (*.iflapp)"
+                )
+                
+                if save_path:
+                    try:
+                        shutil.move(result_path, save_path)
+                        self.log(f"[INFO] Paquete guardado en: {save_path}")
+                        QMessageBox.information(self, "Éxito", f"Paquete guardado exitosamente en:\n{save_path}")
+                    except Exception as e:
+                        self.log(f"[ERROR] No se pudo mover el archivo: {e}")
+                        QMessageBox.warning(self, "Error", f"No se pudo guardar el archivo en la ubicación seleccionada:\n{e}")
+                else:
+                    self.log("[INFO] Guardado cancelado por el usuario. El archivo permanece en la carpeta de salida temporal.")
+                    
+            else:
+                self.log("[ERROR] Error durante la compilación.")
+                self.progress_bar.setValue(0)
 
 
 # El bloque global principal (main) debería permanecer fuera de la clase, así:
@@ -1007,114 +1581,117 @@ if __name__ == "__main__":
     parser.add_argument("repo_path", nargs="?", help="Ruta al repositorio del proyecto")
     parser.add_argument("--output", help="Ruta de salida para los paquetes.")
     parser.add_argument("--gui", action="store_true", help="Forzar modo GUI.")
+    parser.add_argument("--cli", action="store_true", help="Forzar modo CLI interactivo.")
 
     args = parser.parse_args()
 
-    should_launch_gui = False
-
-    if args.gui:
-        should_launch_gui = True
-    elif not args.repo_path:
-        # Si no hay argumento posicional, intentamos GUI
-        should_launch_gui = True
-
-    if should_launch_gui:
-        print("[DEBUG] Intentando lanzar GUI...")
-        if HAS_PYQT5:
-            print("[DEBUG] PyQt5 detectado. Inicializando QApplication...")
-            app = QApplication(sys.argv)
-
-            # Fuente global para la aplicación
-            font = QFont("Segoe UI Variable Display", 9)
-            app.setFont(font)
-
-            print("[DEBUG] Creando ventana CompilerGUI...")
-            window = CompilerGUI()
-            print("[DEBUG] Mostrando ventana...")
-            window.show()
-            print("[DEBUG] Ejecutando app.exec_()...")
-            sys.exit(app.exec_())
-        else:
-            print("[WARN] PyQt5 no está instalado.")
-            print("[INFO] Activando modo CLI automático...")
-            print("[INFO] Usando directorio actual como proyecto...")
-            print("")
-            
-            # Use current directory as repo
-            repo_path = os.getcwd()
-            
-            # Validate that current directory has details.xml
-            details_xml = Path(repo_path) / "details.xml"
-            if not details_xml.exists():
-                print(f"[ERROR] No se encontró details.xml en el directorio actual: {repo_path}")
-                print("[ERROR] El directorio actual no es un proyecto Flarm válido.")
-                print("")
-                print("Opciones:")
-                print("  1. Navega a un directorio de proyecto válido y ejecuta nuevamente")
-                print("  2. Usa modo CLI explícito: python compiler_full.py <ruta_repositorio>")
-                print("  3. Instala PyQt5 para usar la interfaz gráfica: pip install PyQt5")
-                sys.exit(1)
-            
-            # Create temp directory for build artifacts
-            temp_output = tempfile.mkdtemp(prefix="flangcompiler_")
-            
-            # Final output will be parent directory
-            parent_dir = str(Path(repo_path).parent)
-            
-            print(f"[INFO] Directorio de proyecto: {repo_path}")
-            print(f"[INFO] Directorio temporal de compilación: {temp_output}")
-            print(f"[INFO] Directorio de salida final: {parent_dir}")
-            print("")
-            print("--- Iniciando Compilación ---")
-            print("")
-            
-            try:
-                # Run compilation
-                compiler = FlangCompiler(repo_path, temp_output)
-                result_path = compiler.run()
-                
-                if result_path:
-                    # Move .iflapp to parent directory
-                    final_path = Path(parent_dir) / result_path.name
-                    
-                    # If file already exists in parent, remove it first
-                    if final_path.exists():
-                        final_path.unlink()
-                    
-                    shutil.move(str(result_path), str(final_path))
-                    
-                    print("")
-                    print("=" * 60)
-                    print("[OK] ¡Compilación exitosa!")
-                    print(f"[OK] Paquete creado: {final_path}")
-                    print("=" * 60)
-                    
-                    # Cleanup temp directory
-                    shutil.rmtree(temp_output, ignore_errors=True)
-                    print(f"[INFO] Directorio temporal limpiado")
-                    sys.exit(0)
-                else:
-                    print("")
-                    print("[ERROR] La compilación falló. Revisa los mensajes anteriores.")
-                    # Cleanup temp directory even on failure
-                    shutil.rmtree(temp_output, ignore_errors=True)
-                    print(f"[INFO] Directorio temporal limpiado")
-                    sys.exit(1)
-                    
-            except Exception as e:
-                print("")
-                print(f"[ERROR] Error durante la compilación: {e}")
-                # Cleanup temp directory on exception
-                shutil.rmtree(temp_output, ignore_errors=True)
-                print(f"[INFO] Directorio temporal limpiado")
-                sys.exit(1)
-    else:
-        # Modo CLI
-        if not args.repo_path:
-            parser.print_help()
-            sys.exit(1)
-
-        print("--- FlangCompiler IT (Modo CLI) ---")
+    # 1. Modo CLI Directo (Argumentos explícitos)
+    if args.repo_path:
+        print("--- FlangCompiler IT (Modo CLI Directo) ---")
         compiler = FlangCompiler(args.repo_path, args.output)
         success = compiler.run()
         sys.exit(0 if success else 1)
+
+    # 2. Determinar si usar GUI o Interactivo
+    use_gui = False
+    
+    if args.gui:
+        use_gui = True
+    elif HAS_PYQT5 and not args.cli:
+        # Por defecto usar GUI si está disponible y no se forzó CLI
+        use_gui = True
+    
+    # 3. Intentar lanzar GUI
+    if use_gui:
+        if HAS_PYQT5:
+            print("[DEBUG] Iniciando GUI (PyQt5)...")
+            app = QApplication(sys.argv)
+            font = QFont("Segoe UI Variable Display", 9)
+            app.setFont(font)
+            window = CompilerGUI()
+            window.show()
+            sys.exit(app.exec_())
+        else:
+            print("[WARN] Se solicitó GUI pero PyQt5 no está instalado.")
+            print("[INFO] Cayendo al modo CLI Interactivo...")
+            # Fallback a interactivo
+
+    # 4. Modo CLI Interactivo (Selector de Carpetas)
+    print("[INFO] Iniciando Selector Interactivo de Carpetas...")
+    
+    selector = InteractiveFolderSelector()
+    repo_path = selector.run()
+    
+    if not repo_path:
+        print("[INFO] Operación cancelada por el usuario.")
+        sys.exit(0)
+    
+    print(f"[INFO] Carpeta seleccionada: {repo_path}")
+    
+    # Actualizar archivos del proyecto antes de compilar
+    update_project_files(repo_path)
+    
+    # Validate that current directory has details.xml
+    details_xml = repo_path / "details.xml"
+    if not details_xml.exists():
+        print(f"[ERROR] No se encontró details.xml en el directorio seleccionado: {repo_path}")
+        print("[ERROR] El directorio no es un proyecto Flarm válido.")
+        print("")
+        print("Opciones:")
+        print("  1. Ejecuta nuevamente y selecciona la carpeta correcta.")
+        print("  2. Crea un archivo details.xml en la carpeta.")
+        sys.exit(1)
+    
+    # Create temp directory for build artifacts
+    temp_output = tempfile.mkdtemp(prefix="flangcompiler_")
+    
+    # Final output will be parent directory
+    parent_dir = str(Path(repo_path).parent)
+    
+    print(f"[INFO] Directorio de proyecto: {repo_path}")
+    print(f"[INFO] Directorio temporal de compilación: {temp_output}")
+    print(f"[INFO] Directorio de salida final: {parent_dir}")
+    print("")
+    print("--- Iniciando Compilación ---")
+    print("")
+    
+    try:
+        # Run compilation
+        compiler = FlangCompiler(repo_path, temp_output)
+        result_path = compiler.run()
+        
+        if result_path:
+            # Move .iflapp to parent directory
+            final_path = Path(parent_dir) / result_path.name
+            
+            # If file already exists in parent, remove it first
+            if final_path.exists():
+                final_path.unlink()
+            
+            shutil.move(str(result_path), str(final_path))
+            
+            print("")
+            print("=" * 60)
+            print("[OK] ¡Compilación exitosa!")
+            print(f"[OK] Paquete creado: {final_path}")
+            print("=" * 60)
+            
+            # Cleanup temp directory
+            shutil.rmtree(temp_output, ignore_errors=True)
+            print(f"[INFO] Directorio temporal limpiado")
+            sys.exit(0)
+        else:
+            print("")
+            print("[ERROR] La compilación falló. Revisa los mensajes anteriores.")
+            # Cleanup temp directory even on failure
+            shutil.rmtree(temp_output, ignore_errors=True)
+            print(f"[INFO] Directorio temporal limpiado")
+            sys.exit(1)
+            
+    except Exception as e:
+        print("")
+        print(f"[ERROR] Error durante la compilación: {e}")
+        # Cleanup temp directory on exception
+        shutil.rmtree(temp_output, ignore_errors=True)
+        print(f"[INFO] Directorio temporal limpiado")
+        sys.exit(1)
