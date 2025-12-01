@@ -62,11 +62,20 @@ python compiler_full.py
 
 ### Instalación de Dependencias
 
+**En Linux:**
+
+PyInstaller se instalará automáticamente si no está disponible. El compilador:
+- Instalará `python3-full`, `python3-venv` y `pipx` mediante `apt` (requiere `sudo`)
+- Creará un entorno virtual en `$HOME/venv-pyinstaller`
+- Instalará PyInstaller en el entorno virtual
+
+**En Windows:**
+
 ```bash
 pip install pyinstaller
 ```
 
-**Opcional (para interfaz gráfica):**
+**Opcional (para interfaz gráfica en ambas plataformas):**
 
 ```bash
 pip install PyQt5

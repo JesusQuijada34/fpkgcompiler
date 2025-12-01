@@ -2,6 +2,36 @@
 
 Todas las mejoras y cambios notables en este proyecto serán documentados en este archivo.
 
+## [v1.2.0] - 2025-11-30
+
+### ✨ Añadido
+
+*   **Instalación Automática de PyInstaller en Linux**:
+    *   Detección automática de PyInstaller antes de la compilación
+    *   Instalación automática en Linux cuando PyInstaller no está disponible
+    *   Instalación de dependencias del sistema (`python3-full`, `python3-venv`, `pipx`) mediante `apt`
+    *   Creación automática de entorno virtual en `$HOME/venv-pyinstaller`
+    *   Instalación de PyInstaller en el entorno virtual
+    *   Uso automático del PyInstaller del entorno virtual para compilaciones
+
+### ⚡ Mejorado
+
+*   Experiencia de usuario en Linux: no requiere instalación manual de PyInstaller
+*   Mensajes informativos detallados durante el proceso de instalación
+*   Verificación de versión de PyInstaller instalado
+*   Gestión robusta de errores durante la instalación
+
+### 🔧 Técnico
+
+*   Nuevos métodos en `FlangCompiler`:
+    *   `_check_pyinstaller_installed()`: Verifica disponibilidad de PyInstaller
+    *   `_install_pyinstaller_linux()`: Instala PyInstaller automáticamente en Linux
+    *   `_ensure_pyinstaller()`: Orquesta la verificación e instalación
+*   Atributo `venv_path` para rastrear ubicación del entorno virtual
+*   Actualización de `_compile_linux_binary()` y `_compile_windows_binary()` para usar PyInstaller del entorno virtual
+
+---
+
 ## [v1.1.0] - 2025-11-30
 
 ### ✨ Añadido

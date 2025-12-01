@@ -75,6 +75,7 @@ class FlangCompiler:
         self.scripts = []
         self.platform_type = None
         self.current_platform = platform.system()  # 'Windows', 'Linux', 'Darwin'
+        self.venv_path = None  # Path to virtual environment if created
 
         # Crear directorio de salida
         self.output_path.mkdir(parents=True, exist_ok=True)
@@ -85,6 +86,141 @@ class FlangCompiler:
     def _report_progress(self, value: int):
         if self.progress_callback:
             self.progress_callback(value)
+
+    def _check_pyinstaller_installed(self) -> bool:
+        """
+        Verifica si PyInstaller está instalado en el sistema.
+        
+        Returns:
+            True si PyInstaller está disponible, False en caso contrario.
+        """
+        try:
+            result = subprocess.run(
+                ["pyinstaller", "--version"],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if result.returncode == 0:
+                print(f"[INFO] PyInstaller encontrado: {result.stdout.strip()}")
+                return True
+            return False
+        except (subprocess.TimeoutExpired, FileNotFoundError, Exception) as e:
+            print(f"[INFO] PyInstaller no encontrado: {e}")
+            return False
+
+    def _install_pyinstaller_linux(self) -> bool:
+        """
+        Instala PyInstaller en Linux usando un entorno virtual.
+        
+        Returns:
+            True si la instalación fue exitosa, False en caso contrario.
+        """
+        print("[INFO] 🔧 Instalando PyInstaller en Linux...")
+        
+        try:
+            # Paso 1: Instalar dependencias del sistema
+            print("[INFO] 🔧 Instalando python3-full, python3-venv y pipx...")
+            result = subprocess.run(
+                ["sudo", "apt", "install", "-y", "python3-full", "python3-venv", "pipx"],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode != 0:
+                print(f"[ERROR] Error instalando dependencias del sistema:\n{result.stderr}")
+                return False
+            print("[OK] ✅ Dependencias del sistema instaladas")
+            
+            # Paso 2: Configurar pipx
+            print("[INFO] 🔧 Configurando pipx...")
+            result = subprocess.run(
+                ["pipx", "ensurepath"],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode != 0:
+                print(f"[WARN] Advertencia al configurar pipx:\n{result.stderr}")
+            
+            # Paso 3: Crear entorno virtual
+            venv_dir = Path.home() / "venv-pyinstaller"
+            self.venv_path = venv_dir
+            
+            if not venv_dir.exists():
+                print(f"[INFO] 🧪 Creando entorno virtual en {venv_dir}...")
+                result = subprocess.run(
+                    ["python3", "-m", "venv", str(venv_dir)],
+                    capture_output=True,
+                    text=True
+                )
+                if result.returncode != 0:
+                    print(f"[ERROR] Error creando entorno virtual:\n{result.stderr}")
+                    return False
+                print("[OK] ✅ Entorno virtual creado")
+            else:
+                print(f"[INFO] 🔁 El entorno virtual ya existe en {venv_dir}")
+            
+            # Paso 4: Actualizar pip en el entorno virtual
+            pip_path = venv_dir / "bin" / "pip"
+            print("[INFO] 📦 Actualizando pip...")
+            result = subprocess.run(
+                [str(pip_path), "install", "--upgrade", "pip"],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode != 0:
+                print(f"[WARN] Advertencia al actualizar pip:\n{result.stderr}")
+            
+            # Paso 5: Instalar PyInstaller
+            print("[INFO] 📦 Instalando PyInstaller...")
+            result = subprocess.run(
+                [str(pip_path), "install", "pyinstaller"],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode != 0:
+                print(f"[ERROR] Error instalando PyInstaller:\n{result.stderr}")
+                return False
+            print("[OK] ✅ PyInstaller instalado")
+            
+            # Paso 6: Verificar instalación
+            pyinstaller_path = venv_dir / "bin" / "pyinstaller"
+            result = subprocess.run(
+                [str(pyinstaller_path), "--version"],
+                capture_output=True,
+                text=True
+            )
+            if result.returncode == 0:
+                print(f"[OK] ✅ PyInstaller instalado correctamente. Versión: {result.stdout.strip()}")
+                print("[INFO] 🎉 Entorno listo. PyInstaller disponible en el entorno virtual.")
+                return True
+            else:
+                print(f"[ERROR] Error verificando PyInstaller:\n{result.stderr}")
+                return False
+                
+        except Exception as e:
+            print(f"[ERROR] Excepción durante la instalación de PyInstaller: {e}")
+            return False
+
+    def _ensure_pyinstaller(self) -> bool:
+        """
+        Asegura que PyInstaller esté disponible. Si no está instalado en Linux,
+        lo instala automáticamente.
+        
+        Returns:
+            True si PyInstaller está disponible, False en caso contrario.
+        """
+        # Verificar si PyInstaller ya está instalado
+        if self._check_pyinstaller_installed():
+            return True
+        
+        # Si no está instalado y estamos en Linux, intentar instalarlo
+        if self.current_platform == "Linux":
+            print("[INFO] PyInstaller no encontrado. Iniciando instalación automática...")
+            return self._install_pyinstaller_linux()
+        else:
+            print(f"[ERROR] PyInstaller no encontrado y la instalación automática solo está disponible en Linux.")
+            print(f"[ERROR] Por favor, instale PyInstaller manualmente: pip install pyinstaller")
+            return False
 
     def parse_details_xml(self) -> bool:
         """
@@ -234,6 +370,11 @@ class FlangCompiler:
             print(f"[SKIP] No se puede compilar para Linux desde {self.current_platform}. Se omite.")
             return True
 
+        # Asegurar que PyInstaller esté disponible
+        if not self._ensure_pyinstaller():
+            print("[ERROR] No se puede continuar sin PyInstaller.")
+            return False
+
         print(f"[INFO] Iniciando compilación para {target_platform}...")
 
         for script in self.scripts:
@@ -260,8 +401,13 @@ class FlangCompiler:
 
         # Comando de compilación
         # Construir comando como lista para mejor manejo de argumentos
+        # Usar PyInstaller del entorno virtual si está disponible
+        pyinstaller_cmd = "pyinstaller"
+        if self.venv_path and self.current_platform == "Linux":
+            pyinstaller_cmd = str(self.venv_path / "bin" / "pyinstaller")
+        
         cmd = [
-            "pyinstaller",
+            pyinstaller_cmd,
             "--onefile",
             "--windowed",
             "--name", script_name,
@@ -303,8 +449,13 @@ class FlangCompiler:
 
         # Comando de compilación (sin icono para Linux, separador :)
         # Construir comando como lista
+        # Usar PyInstaller del entorno virtual si está disponible
+        pyinstaller_cmd = "pyinstaller"
+        if self.venv_path:
+            pyinstaller_cmd = str(self.venv_path / "bin" / "pyinstaller")
+        
         cmd = [
-            "pyinstaller",
+            pyinstaller_cmd,
             "--onefile",
             "--name", script_name,
             "--add-data", "assets:assets",

@@ -1,237 +1,239 @@
-# Release Notes - FlangCompiler IT v1.1.0
+# Release Notes - FlangCompiler IT v1.2.0
 
 **Fecha de Lanzamiento**: 30 de Noviembre, 2025
 
 ## 🎉 Novedades Principales
 
-### Modo de Fallback Automático (Sin PyQt5)
+### Instalación Automática de PyInstaller en Linux
 
-FlangCompiler IT ahora funciona perfectamente **sin necesidad de PyQt5**. Si la librería no está instalada, el programa automáticamente activa un modo CLI inteligente que:
+FlangCompiler IT ahora **instala PyInstaller automáticamente** en sistemas Linux cuando no está disponible. Esta característica elimina la necesidad de configuración manual y mejora significativamente la experiencia del usuario.
 
-- ✅ Detecta el proyecto en el directorio actual
-- ✅ Compila binarios en ubicación temporal
-- ✅ Empaqueta todo en formato `.iflapp`
-- ✅ Guarda el resultado en el directorio padre
-- ✅ Limpia archivos temporales automáticamente
+#### Características Principales:
+
+- ✅ Detección automática de PyInstaller antes de compilar
+- ✅ Instalación de dependencias del sistema (`python3-full`, `python3-venv`, `pipx`)
+- ✅ Creación de entorno virtual en `$HOME/venv-pyinstaller`
+- ✅ Instalación de PyInstaller en el entorno virtual
+- ✅ Uso automático del entorno virtual para compilaciones
 
 ## 📋 Cambios Detallados
 
 ### Nuevas Funcionalidades
 
-#### 1. Detección Inteligente de Entorno
+#### 1. Verificación Automática de PyInstaller
 
-El compilador ahora verifica la disponibilidad de PyQt5 al inicio:
-
-```
-[WARN] PyQt5 no está instalado.
-[INFO] Activando modo CLI automático...
-[INFO] Usando directorio actual como proyecto...
-```
-
-#### 2. Gestión de Directorios Temporales
-
-- **Creación**: Usa `tempfile.mkdtemp()` para crear directorios seguros
-- **Ubicación**: Sistema temp del OS (ej: `C:\Users\...\AppData\Local\Temp\flangcompiler_xxxxx\` en Windows, `/tmp/flangcompiler_xxxxx/` en Linux)
-- **Limpieza**: Eliminación automática después de empaquetar
-
-#### 3. Salida en Directorio Padre
-
-Los archivos `.iflapp` se guardan automáticamente en el directorio padre:
+El compilador ahora verifica la disponibilidad de PyInstaller antes de iniciar la compilación:
 
 ```
-Estructura:
-/proyectos/
-├── mi_app/              (directorio actual)
-│   ├── details.xml
-│   ├── app.py
-│   └── assets/
-└── Publisher.App.v1.0.Knosthalij.iflapp  ← Salida aquí
+[INFO] PyInstaller encontrado: 6.3.0
 ```
 
-### Mejoras de Usabilidad
+O si no está instalado:
 
-- **Mensajes Informativos**: Logs detallados sobre ubicaciones y procesos
-- **Manejo de Errores**: Limpieza de temporales incluso si falla la compilación
-- **Validación**: Verifica que el directorio actual tenga `details.xml` válido
-- **Compatibilidad**: Funciona en Windows y Linux sin cambios
+```
+[INFO] PyInstaller no encontrado: [Errno 2] No such file or directory: 'pyinstaller'
+[INFO] PyInstaller no encontrado. Iniciando instalación automática...
+```
+
+#### 2. Instalación Automática en Linux
+
+Cuando PyInstaller no está disponible en Linux, el compilador ejecuta automáticamente:
+
+```
+[INFO] 🔧 Instalando PyInstaller en Linux...
+[INFO] 🔧 Instalando python3-full, python3-venv y pipx...
+[OK] ✅ Dependencias del sistema instaladas
+[INFO] 🔧 Configurando pipx...
+[INFO] 🧪 Creando entorno virtual en /home/usuario/venv-pyinstaller...
+[OK] ✅ Entorno virtual creado
+[INFO] 📦 Actualizando pip...
+[INFO] 📦 Instalando PyInstaller...
+[OK] ✅ PyInstaller instalado
+[OK] ✅ PyInstaller instalado correctamente. Versión: 6.3.0
+[INFO] 🎉 Entorno listo. PyInstaller disponible en el entorno virtual.
+```
+
+#### 3. Uso del Entorno Virtual
+
+Una vez instalado, todas las compilaciones utilizan automáticamente el PyInstaller del entorno virtual, garantizando consistencia y aislamiento.
 
 ## 🚀 Guía de Uso
 
-### Escenario 1: Con PyQt5 Instalado
-
-```bash
-python compiler_full.py
-# Abre interfaz gráfica
-```
-
-### Escenario 2: Sin PyQt5 (Nuevo - Modo Fallback)
+### En Linux (Primera Vez)
 
 ```bash
 cd /ruta/a/tu/proyecto
-python compiler_full.py
-# Compila automáticamente y crea .iflapp en directorio padre
+python fpkgcompiler.py
+
+# El programa solicitará sudo para instalar dependencias del sistema
+# Después, todo se configura automáticamente
 ```
 
 **Salida esperada:**
 ```
-[WARN] PyQt5 no está instalado.
-[INFO] Activando modo CLI automático...
-[INFO] Usando directorio actual como proyecto...
-
-[INFO] Directorio de proyecto: C:\Users\...\mi_proyecto
-[INFO] Directorio temporal de compilación: C:\Users\...\Temp\flangcompiler_abc123
-[INFO] Directorio de salida final: C:\Users\...\
-
---- Iniciando Compilación ---
-
-[INFO] Metadatos extraídos:
-  - Publicador: MiPublisher
-  - Aplicación: MiApp
-  - Versión: v1.0
-  - Plataforma: Knosthalij
-
-[INFO] Compilando script: MiApp...
-[OK] MiApp compilado correctamente.
-[INFO] Creando paquete para Windows...
-[OK] Archivo .iflapp creado: ...
-
-============================================================
-[OK] ¡Compilación exitosa!
-[OK] Paquete creado: C:\Users\...\MiPublisher.MiApp.v1.0.Knosthalij.iflapp
-============================================================
-[INFO] Directorio temporal limpiado
+[INFO] PyInstaller no encontrado. Iniciando instalación automática...
+[sudo] password for usuario: 
+[INFO] 🔧 Instalando python3-full, python3-venv y pipx...
+[OK] ✅ Dependencias del sistema instaladas
+...
+[OK] ✅ PyInstaller instalado correctamente. Versión: 6.3.0
+[INFO] Iniciando compilación para Linux...
 ```
 
-### Escenario 3: CLI Explícito
+### En Linux (Usos Posteriores)
 
 ```bash
-python compiler_full.py /ruta/proyecto --output /ruta/salida
-# Funciona igual que antes
+cd /ruta/a/tu/proyecto
+python fpkgcompiler.py
+
+# PyInstaller ya está instalado, la compilación inicia directamente
+```
+
+**Salida esperada:**
+```
+[INFO] PyInstaller encontrado: 6.3.0
+[INFO] Iniciando compilación para Linux...
+```
+
+### En Windows
+
+```bash
+# En Windows, PyInstaller debe instalarse manualmente
+pip install pyinstaller
+
+python fpkgcompiler.py
 ```
 
 ## 🔧 Detalles Técnicos
 
-### Flujo de Fallback
+### Nuevos Métodos en FlangCompiler
 
-1. **Detección**: Verifica `HAS_PYQT5` flag (línea 54)
-2. **Validación**: Confirma que directorio actual tiene `details.xml`
-3. **Temp Setup**: Crea `tempfile.mkdtemp(prefix="flangcompiler_")`
-4. **Compilación**: Ejecuta PyInstaller en directorio temporal
-5. **Empaquetado**: Crea `.iflapp` en directorio temporal
-6. **Movimiento**: Mueve `.iflapp` a directorio padre
-7. **Limpieza**: Elimina directorio temporal con `shutil.rmtree(ignore_errors=True)`
+1. **`_check_pyinstaller_installed()`**
+   - Verifica si PyInstaller está disponible ejecutando `pyinstaller --version`
+   - Retorna `True` si está instalado, `False` en caso contrario
+
+2. **`_install_pyinstaller_linux()`**
+   - Instala dependencias del sistema usando `sudo apt install`
+   - Crea entorno virtual en `$HOME/venv-pyinstaller`
+   - Instala PyInstaller usando pip del entorno virtual
+   - Verifica la instalación
+
+3. **`_ensure_pyinstaller()`**
+   - Orquesta la verificación e instalación
+   - Se ejecuta automáticamente antes de cada compilación
+
+### Flujo de Instalación
+
+1. **Verificación**: Ejecuta `pyinstaller --version`
+2. **Detección de SO**: Si no está instalado, verifica que sea Linux
+3. **Instalación de Sistema**: `sudo apt install -y python3-full python3-venv pipx`
+4. **Configuración de pipx**: `pipx ensurepath`
+5. **Entorno Virtual**: `python3 -m venv $HOME/venv-pyinstaller`
+6. **Actualización de pip**: `$HOME/venv-pyinstaller/bin/pip install --upgrade pip`
+7. **Instalación de PyInstaller**: `$HOME/venv-pyinstaller/bin/pip install pyinstaller`
+8. **Verificación**: `$HOME/venv-pyinstaller/bin/pyinstaller --version`
 
 ### Cambios en el Código
 
-**Archivo modificado**: `compiler_full.py`
+**Archivo modificado**: `fpkgcompiler.py`
 
-**Líneas modificadas**:
-- Línea 42: Añadido `import tempfile`
-- Líneas 1303-1377: Implementación completa del modo fallback
+**Nuevos atributos**:
+- `self.venv_path`: Almacena la ruta del entorno virtual
 
-**Nuevas características**:
-- Validación de `details.xml` en directorio actual
-- Creación de directorio temporal seguro
-- Movimiento de `.iflapp` a directorio padre
-- Limpieza garantizada con bloques `try-except-finally`
-
-### Compatibilidad
-
-- ✅ Windows 10/11
-- ✅ Linux (Ubuntu, Debian, Fedora, etc.)
-- ✅ Python 3.8+
-- ✅ Con o sin PyQt5
+**Métodos modificados**:
+- `compile_binaries()`: Llama a `_ensure_pyinstaller()` antes de compilar
+- `_compile_linux_binary()`: Usa PyInstaller del entorno virtual si está disponible
+- `_compile_windows_binary()`: Usa PyInstaller del entorno virtual si está disponible (en Linux)
 
 ## 📦 Requisitos
 
-### Obligatorios
+### Linux
 - Python 3.8 o superior
-- PyInstaller
+- `sudo` para instalación de dependencias del sistema (solo primera vez)
+- PyInstaller se instala automáticamente
 
-### Opcionales
-- PyQt5 (para interfaz gráfica)
+### Windows
+- Python 3.8 o superior
+- PyInstaller (instalación manual): `pip install pyinstaller`
 
-## 🐛 Correcciones
-
-- Manejo correcto de rutas en diferentes sistemas operativos
-- Limpieza de recursos temporales en caso de error
-- Validación mejorada de estructura de proyecto
-- Prevención de sobrescritura accidental de archivos `.iflapp` existentes
-
-## 📝 Notas de Migración
-
-### Desde v1.0.0
-
-No se requieren cambios en proyectos existentes. La nueva funcionalidad es completamente retrocompatible.
-
-### Comportamiento Modificado
-
-**Antes (v1.0.0)**:
-```bash
-python compiler_full.py  # Sin PyQt5 → Error y salida
-```
-
-**Ahora (v1.1.0)**:
-```bash
-python compiler_full.py  # Sin PyQt5 → Compila directorio actual
-```
-
-Si no deseas este comportamiento, simplemente navega a un directorio sin `details.xml` o usa el modo CLI explícito.
+### Opcional (Ambas Plataformas)
+- PyQt5 (para interfaz gráfica): `pip install PyQt5`
 
 ## ⚠️ Notas Importantes
 
-### Limpieza de Temporales
+### Permisos de Sudo
 
-El programa limpia automáticamente los directorios temporales. Sin embargo, si el proceso es interrumpido abruptamente (ej: `Ctrl+C`, cierre forzado), pueden quedar archivos en:
+La primera vez que se ejecuta en Linux sin PyInstaller, el programa solicitará la contraseña de sudo para instalar:
+- `python3-full`
+- `python3-venv`
+- `pipx`
 
-- **Windows**: `C:\Users\<usuario>\AppData\Local\Temp\flangcompiler_*`
-- **Linux**: `/tmp/flangcompiler_*`
+Estos paquetes son necesarios para crear el entorno virtual.
 
-Estos pueden ser eliminados manualmente sin problemas.
+### Ubicación del Entorno Virtual
 
-### Ubicación de Salida
+El entorno virtual se crea en: `$HOME/venv-pyinstaller`
 
-El archivo `.iflapp` siempre se guarda en el **directorio padre** del proyecto, no en el directorio del proyecto mismo. Esto evita contaminar el directorio de trabajo.
+Este directorio persiste entre ejecuciones, por lo que la instalación solo ocurre una vez.
+
+### Compatibilidad
+
+- ✅ Ubuntu 20.04+
+- ✅ Debian 11+
+- ✅ Linux Mint 20+
+- ✅ Otras distribuciones basadas en Debian/Ubuntu con `apt`
+- ⚠️ Distribuciones no basadas en Debian requieren instalación manual de PyInstaller
+
+## 🐛 Correcciones
+
+- Manejo robusto de errores durante la instalación de PyInstaller
+- Verificación de versión después de la instalación
+- Mensajes informativos mejorados durante el proceso
+
+## 📝 Notas de Migración
+
+### Desde v1.1.0
+
+No se requieren cambios. La nueva funcionalidad es completamente retrocompatible.
+
+### Usuarios de Linux
+
+Si ya tienen PyInstaller instalado globalmente o en un entorno virtual activado, el compilador lo detectará y usará esa instalación sin crear un nuevo entorno virtual.
 
 ## 🎯 Casos de Uso
 
-### Desarrollo Local sin GUI
+### Desarrollo en Servidores Linux
 
-Ideal para desarrolladores que trabajan en servidores sin entorno gráfico o prefieren flujos de trabajo CLI:
+Ideal para compilar en servidores Linux sin configuración previa:
 
 ```bash
-cd ~/proyectos/mi_app
-python ~/tools/compiler_full.py
-# Resultado: ~/proyectos/Publisher.App.v1.0.Platform.iflapp
+ssh usuario@servidor
+cd ~/proyecto
+python ~/tools/fpkgcompiler.py
+# Primera vez: instala PyInstaller automáticamente
+# Siguientes veces: usa PyInstaller del entorno virtual
 ```
 
 ### Integración CI/CD
 
-Perfecto para pipelines de integración continua donde PyQt5 no está disponible:
+Perfecto para pipelines de integración continua en Linux:
 
 ```yaml
 # .github/workflows/build.yml
 - name: Build Flarm Package
   run: |
-    cd ${{ github.workspace }}/app
-    python compiler_full.py
+    cd ${{ github.workspace }}
+    python fpkgcompiler.py
+    # PyInstaller se instala automáticamente si es necesario
 ```
 
-### Compilación Rápida
+### Entornos Limpios
 
-Para compilaciones rápidas sin necesidad de abrir la GUI:
-
-```bash
-cd mi_proyecto && python ../compiler_full.py && cd ..
-```
-
-## 🙏 Agradecimientos
-
-Gracias a la comunidad Flarm por el feedback y sugerencias que hicieron posible esta mejora.
+Útil para trabajar en entornos limpios sin contaminar el sistema con dependencias globales.
 
 ---
 
 **Desarrollado por**: Manus AI  
 **Licencia**: MIT  
-**Versión**: 1.1.0  
+**Versión**: 1.2.0  
 **Fecha**: 30 de Noviembre, 2025
