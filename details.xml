@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <app>
-  <publisher>Influent</publisher>
+  <publisher>influent</publisher>
   <app>fpkgcompiler</app>
   <name>Flarm Package Compiler True Edition</name>
-  <version>v1.2.0-26.08-21.56-AlphaCube</version>
-  <correlationid>cfe2ce9b641a9fce8b22bde7b693a2ccfa0e311e0d8ea55daea9b4ab1a4f6287</correlationid>
+  <version>v1.2-26.08-21.56</version>
+  <correlationid>b5a8c96909d6a0baf26e98d8a681dcf25656d653a65a1aaeb6a99b6286948b11</correlationid>
   <rate>Todas las edades</rate>
   <author>JesusQuijada34</author>
   <platform>AlphaCube</platform>
