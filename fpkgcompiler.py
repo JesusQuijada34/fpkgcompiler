@@ -797,13 +797,16 @@ echo "🎉 Entorno listo. Puedes usar PyInstaller dentro del entorno virtual."
 
         # Copiar archivos del repositorio
         for item in self.repo_path.iterdir():
-            # Verificar si el archivo/directorio está ignorado
-            if is_ignored(item.name):
+            # AlphaCube debe conservar fuentes y requisitos aunque el template ignore `lib`.
+            alpha_source_dir = target_platform == "AlphaCube" and item.name == "lib"
+            if is_ignored(item.name) and not alpha_source_dir:
                 continue
 
             if item.name in ["details.xml", "README.md", "LICENSE", "CHANGELOG.md"]:
                 if item.is_file():
                     shutil.copy2(item, package_path / item.name)
+            elif target_platform == "AlphaCube" and item.is_file() and item.suffix == ".py":
+                shutil.copy2(item, package_path / item.name)
             elif item.is_dir() and item.name not in ["releases"]: # releases ya debería estar ignorado por lógica o .gitignore, pero por seguridad
                 # Copiar directorios (assets, app, etc.)
                 dest_dir = package_path / item.name
