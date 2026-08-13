@@ -380,14 +380,9 @@ echo "🎉 Entorno listo. Puedes usar PyInstaller dentro del entorno virtual."
         if self._check_pyinstaller_installed():
             return True
         
-        # Si no está instalado y estamos en Linux, intentar instalarlo
-        if self.current_platform == "Linux":
-            print("[INFO] PyInstaller no encontrado. Iniciando instalación automática...")
-            return self._install_pyinstaller_linux()
-        else:
-            print(f"[ERROR] PyInstaller no encontrado y la instalación automática solo está disponible en Linux.")
-            print(f"[ERROR] Por favor, instale PyInstaller manualmente: pip install pyinstaller")
-            return False
+        print("[ERROR] PyInstaller no está disponible. No se instalará automáticamente ni se usará sudo.")
+        print("[ERROR] Instale PyInstaller en un entorno aislado: python -m venv .venv && .venv/bin/pip install pyinstaller")
+        return False
 
     def parse_details_xml(self) -> bool:
         """
@@ -503,8 +498,8 @@ echo "🎉 Entorno listo. Puedes usar PyInstaller dentro del entorno virtual."
             True si se debe compilar, False en caso contrario.
         """
         if self.platform_type == "AlphaCube":
-            # AlphaCube compila para ambas plataformas
-            return True
+            # AlphaCube es código fuente universal; no genera binarios.
+            return False
         elif self.platform_type == "Knosthalij":
             # Knosthalij solo compila para Windows
             return target_platform == "Windows"
@@ -716,13 +711,16 @@ echo "🎉 Entorno listo. Puedes usar PyInstaller dentro del entorno virtual."
         Returns:
             True si la creación fue exitosa, False en caso contrario.
         """
-        if not self.should_compile_for_platform(target_platform):
+        if target_platform not in {"Windows", "Linux", "AlphaCube"}:
+            print(f"[ERROR] Destino desconocido: {target_platform}")
+            return False
+        if target_platform != "AlphaCube" and not self.should_compile_for_platform(target_platform):
             return True
 
         print(f"[INFO] Creando paquete para {target_platform}...")
 
         # Determinar el sufijo de plataforma
-        platform_suffix = "Knosthalij" if target_platform == "Windows" else "Danenone"
+        platform_suffix = {"Windows": "Knosthalij", "Linux": "Danenone", "AlphaCube": "AlphaCube"}[target_platform]
 
         # Nombre del paquete: publisher.app.version.platform
         package_name = f"{self.metadata['publisher']}.{self.metadata['app']}.{self.metadata['version']}.{platform_suffix}"
@@ -768,7 +766,7 @@ echo "🎉 Entorno listo. Puedes usar PyInstaller dentro del entorno virtual."
         """
         # Archivos a excluir por defecto
         exclude_patterns = [
-            "requirements.txt",
+            *([] if target_platform == "AlphaCube" else ["requirements.txt"]),
             "*.sh" if target_platform == "Windows" else "*.bat",
             "*.pyc",
             "__pycache__",
@@ -786,9 +784,9 @@ echo "🎉 Entorno listo. Puedes usar PyInstaller dentro del entorno virtual."
         # Agregar patrones del .gitignore
         exclude_patterns.extend(self._parse_gitignore())
 
-        # Agregar *.py para eliminar scripts del paquete compilado
-        # (El usuario solicitó eliminar scripts después de compilar)
-        exclude_patterns.append("*.py")
+        # Los paquetes binarios excluyen fuentes; AlphaCube conserva el código fuente.
+        if target_platform != "AlphaCube":
+            exclude_patterns.append("*.py")
 
         # Función auxiliar para verificar si un nombre debe ser ignorado
         def is_ignored(name):
@@ -894,10 +892,28 @@ echo "🎉 Entorno listo. Puedes usar PyInstaller dentro del entorno virtual."
             
         self._report_progress(15)
 
+        # AlphaCube es una distribución de código fuente universal.
+        if self.platform_type == "AlphaCube":
+            package_name = f"{self.metadata['publisher']}.{self.metadata['app']}.{self.metadata['version']}.AlphaCube"
+            package_path = self.output_path / package_name
+            if package_path.exists():
+                shutil.rmtree(package_path)
+            package_path.mkdir(parents=True, exist_ok=True)
+            self._copy_package_files(package_path, "AlphaCube")
+            self._update_and_copy_details_xml(package_path, "AlphaCube")
+            iflapp_path = self.output_path / f"{package_name}.iflapp"
+            if iflapp_path.exists():
+                iflapp_path.unlink()
+            if not self.compress_to_iflapp(package_path, iflapp_path):
+                return None
+            self._report_progress(100)
+            print("[OK] AlphaCube creado como código fuente universal; no se ejecutó PyInstaller.")
+            return iflapp_path
+
         # Paso 3: Compilar binarios y crear paquetes
         platforms_to_compile = []
         
-        # Lógica estricta de plataforma
+        # Lógica estricta de plataforma binaria
         if self.current_platform == "Windows":
             if self.should_compile_for_platform("Windows"):
                 platforms_to_compile.append("Windows")
@@ -906,7 +922,7 @@ echo "🎉 Entorno listo. Puedes usar PyInstaller dentro del entorno virtual."
                 platforms_to_compile.append("Linux")
         
         if not platforms_to_compile:
-            print("[WARN] No hay plataformas compatibles para compilar.")
+            print("[WARN] No hay plataformas binarias compatibles para compilar.")
             return None
 
         last_package_path = None
